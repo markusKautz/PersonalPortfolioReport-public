@@ -253,9 +253,9 @@
       "parameters": {
         "modelId": {
           "__rl": true,
-          "value": "claude-opus-5",
+          "value": "claude-opus-5-5",
           "mode": "list",
-          "cachedResultName": "claude-opus-5"
+          "cachedResultName": "claude-opus-5-5"
         },
         "messages": {
           "values": [

@@ -123,4 +123,6 @@ API-Code, Docker-Compose-Dateien und das SQL-Schema liegen in einem separaten In
 
 ## Kosten
 
-Ca. 1,50 bis 2,50 EUR pro Woche, überwiegend für Tavily (rund 48 Suchanfragen) und Claude Opus. yfinance ist kostenlos.
+Bei 15 Positionen und wöchentlichem Report ca. **0,38 USD pro Woche**. Tavily kommt mit dem kostenlosen Researcher-Tier aus, yfinance ist ebenfalls kostenlos, die Kosten entfallen damit im Wesentlichen auf Claude Opus.
+
+Mehr Positionen oder häufigere Läufe erhöhen die Kosten entsprechend, sowohl beim Opus-Aufruf als auch bei den Tavily-Suchanfragen (dann ggf. über das Freikontingent hinaus).

@@ -49,10 +49,12 @@ n8n ist für den Betrieb hinter einem Proxy und die Interaktion mit lokalen Date
 Ursprünglich war ein zweistufiges Modell geplant (Sonnet zur Vorverarbeitung, Opus für den finalen Text). In der Praxis hat sich gezeigt, dass der kombinierte Daten-JSON (50–100 KB) klein genug für Claude Opus ist. Der Verzicht auf den Zwischenschritt reduziert Latenz, Kosten und Komplexität.
 
 ### Kostenstruktur
-Der Betrieb des Workflows verursacht laufende Kosten von ca. **1,50 € – 2,50 € pro Woche**, primär getrieben durch:
-- **Tavily Search**: Ca. $0.50 für ~48 Queries (News/Earnings).
-- **Claude Opus**: Ca. $1.00 – $2.00 für die Generierung des Berichts.
+Bei 15 Positionen und wöchentlichem Report verursacht der Workflow laufende Kosten von ca. **0,38 USD pro Woche**:
+- **Claude Opus**: Praktisch die gesamten Kosten, für die Generierung des Berichts.
+- **Tavily Search**: Kostenlos, das Researcher-Tier (Free) reicht für ~48 Queries pro Woche (News/Earnings/Makro).
 - **yfinance**: Kostenlos.
+
+Mehr Positionen oder häufigere Läufe erhöhen die Kosten entsprechend, bei Tavily ggf. über das Freikontingent hinaus.
 
 ### Workflow-Optimierung
 Um Race Conditions beim Zusammenführen von Daten zu vermeiden, wurde die Abfrage von Bestands- und Watchlist-Werten in einem einzigen PostgreSQL-Node via `UNION ALL` gelöst. Ein Diskriminator-Feld (`record_type`) ermöglicht die spätere Unterscheidung im Workflow.
