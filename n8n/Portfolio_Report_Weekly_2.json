@@ -1,0 +1,524 @@
+{
+  "name": "Portfolio_Report_Weekly_2",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 6"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1008,
+        -176
+      ],
+      "id": "0676b34c-ce98-413f-8122-c7e0f42dd4f6",
+      "name": "Every Saturday 8am"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH running AS (\n    SELECT\n      t.asset_id,\n      t.id,\n      t.type,\n      t.quantity,\n      t.price_per_unit,\n      t.fees,\n      SUM(CASE\n        WHEN t.type = 'BUY'   THEN  t.quantity\n        WHEN t.type = 'SELL'  THEN -t.quantity\n        WHEN t.type = 'SPLIT' THEN  t.quantity\n        ELSE 0\n      END) OVER (PARTITION BY t.asset_id ORDER BY t.transaction_date, t.id) AS running_qty\n    FROM transactions t\n  ),\n  last_zero AS (\n    SELECT asset_id, MAX(id) AS last_zero_id\n    FROM running\n    WHERE running_qty = 0\n    GROUP BY asset_id\n  ),\n  relevant AS (\n    SELECT t.*\n    FROM transactions t\n    LEFT JOIN last_zero lz ON lz.asset_id = t.asset_id\n    WHERE lz.last_zero_id IS NULL\n       OR t.id > lz.last_zero_id\n  )\n  SELECT\n      'asset'              AS record_type,\n      aa.name,\n      aa.yahoo_ticker      AS ticker,\n      aa.asset_class,\n      aa.basket,\n      aa.quantity_unit,\n      aa.investment_thesis,\n      COALESCE(SUM(\n        CASE\n          WHEN r.type = 'BUY'   THEN  r.quantity\n          WHEN r.type = 'SELL'  THEN -r.quantity\n          WHEN r.type = 'SPLIT' THEN  r.quantity\n          ELSE 0\n        END\n      ), 0)                AS quantity,\n      CASE\n        WHEN SUM(CASE WHEN r.type IN ('BUY', 'SPLIT') THEN r.quantity ELSE 0 END) > 0\n        THEN SUM(CASE WHEN r.type = 'BUY' THEN r.quantity * r.price_per_unit + r.fees ELSE 0 END)\n             / SUM(CASE WHEN r.type IN ('BUY', 'SPLIT') THEN r.quantity ELSE 0 END)\n        ELSE NULL\n      END AS buy_in\n    FROM account_assets aa\n    LEFT JOIN relevant r ON r.asset_id = aa.id\n    WHERE aa.is_active = TRUE AND aa.yahoo_ticker IS NOT NULL\n    GROUP BY aa.name, aa.yahoo_ticker, aa.asset_class, aa.basket, aa.quantity_unit,\n    aa.investment_thesis\n\n  UNION ALL\n\n  SELECT\n      'watchlist'          AS record_type,\n      name,\n      yahoo_ticker         AS ticker,\n      asset_class,\n      NULL                 AS basket,\n      'share'              AS quantity_unit,\n      investment_thesis,\n      NULL                 AS quantity,\n      NULL                 AS buy_in\n    FROM watchlist\n  ORDER BY record_type, name",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -784,
+        -80
+      ],
+      "id": "27b5de84-b009-436f-9540-77f9e5f4ad99",
+      "name": "Postgres Assets",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "query": "={{ $json.query }}",
+        "options": {
+          "search_depth": "advanced",
+          "max_results": 10,
+          "days": 7,
+          "include_answer": "advanced"
+        }
+      },
+      "type": "@tavily/n8n-nodes-tavily.tavily",
+      "typeVersion": 1,
+      "position": [
+        -112,
+        16
+      ],
+      "id": "520b8943-9211-457c-81b8-48bb6b3a5702",
+      "name": "Search",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "tavilyApi": {
+          "id": "REPLACE_ME",
+          "name": "Tavily account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        336,
+        -368
+      ],
+      "id": "71825e97-7fe3-473a-8847-e05839d94f89",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n  const items = [];\n  const seenTickers = new Set();\n\n  for (const asset of [...data.assets, ...data.watchlist]) {\n    if (asset.name.toLowerCase().includes('etf')) continue;\n\n    if (asset.ticker && seenTickers.has(asset.ticker)) continue;\n    if (asset.ticker) seenTickers.add(asset.ticker);\n\n    const isCrypto = asset.name.toLowerCase().includes('bitcoin')\n      || asset.ticker === 'BTC-EUR';\n    const isCommodity = asset.ticker === 'GC=F';\n\n    const query = isCrypto\n      ? `${asset.name} crypto news`\n      : isCommodity\n        ? 'Gold commodity price news'\n        : `${asset.name} stock news`;\n\n    items.push({ json: { name: asset.name, ticker: asset.ticker, query } });\n  }\n\n  items.push({ json: { name: 'Makro',  ticker: null, query: 'global stock market outlook' } });\n  items.push({ json: { name: 'Zinsen', ticker: null, query: 'Federal Reserve ECB interest rates inflation' } });\n\n  return items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -336,
+        16
+      ],
+      "id": "8d575667-22ff-44a4-b321-f79f49c54361",
+      "name": "Prepare Query"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        560,
+        -192
+      ],
+      "id": "93d275b0-4146-43eb-a68f-ddc84c6c1ed4",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": " const results = $input.all().map(item => ({\n    name:    item.json.name,\n    ticker:  item.json.ticker,\n    answer:  item.json.answer,\n    results: item.json.results?.map(r => ({\n      title:   r.title,\n      url:     r.url,\n      content: r.content\n    }))\n  }));\n\n  return [{ json: { news: results } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        16
+      ],
+      "id": "de03f18c-bec7-4901-8e41-47f71a619529",
+      "name": "Aggregate News"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://portfolio-report-api:8000/fetch-prices",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        336,
+        -176
+      ],
+      "id": "9a808d51-2a53-43b1-a0fc-196fd1ed89fe",
+      "name": "Fetch Prices",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => {\n    const { quantity_unit, ...rest } = i.json;\n    return { ...rest, unit: quantity_unit };\n  });\n\n  return [{\n    json: {\n      assets:    items.filter(i => i.record_type === 'asset'),\n      watchlist: items.filter(i => i.record_type === 'watchlist')\n    }\n  }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        -80
+      ],
+      "id": "c40e60f4-2e2a-4b59-9ea9-c24e1c840374",
+      "name": "Reorganize by Type",
+      "executeOnce": false,
+      "alwaysOutputData": false,
+      "retryOnFail": false,
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "36c5ed93-5d13-45bc-b3f3-5f765d2da789",
+              "name": "=name",
+              "value": "={{ $('Prepare Query').item.json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "3b362b4f-dfc1-471a-86bb-4b2c934a76db",
+              "name": "ticker",
+              "value": "={{ $('Prepare Query').item.json.ticker }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        112,
+        16
+      ],
+      "id": "58d5fbe1-0b72-4812-963a-24bbe88c893b",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prices   = $('Fetch Prices').first().json;\n  const allNews  = $('Aggregate News').first().json.news;\n  const strategy = $('Extract from File').first().json.data;\n\n  const knownNames = new Set([\n    ...prices.assets.map(a => a.name),\n    ...prices.watchlist.map(w => w.name),\n  ]);\n\n  const newsMap   = {};\n  const macroNews = [];\n  allNews.forEach(n => {\n    const cleaned = { ...n, results: n.results?.map(({ content, ...rest }) => rest) ?? [] };\n    if (knownNames.has(n.name)) newsMap[n.name] = cleaned;\n    else macroNews.push(cleaned);\n  });\n\n  const pct = (x) => (x == null || isNaN(x)) ? null : Math.round(x * 10000) / 100;\n\n  function calcAsset(a) {\n    const qty   = parseFloat(a.quantity) || 0;\n    const buyIn = parseFloat(a.buy_in);\n    const currentValueEur = a.price != null ? a.price * qty : null;\n    const performancePct  = (buyIn && a.price)\n      ? Math.round((a.price / buyIn - 1) * 10000) / 100 : null;\n    return {\n      ...a,\n      quantity:          qty,\n      buy_in:            isNaN(buyIn) ? null : buyIn,\n      current_value_eur: currentValueEur != null ? Math.round(currentValueEur * 100) / 100 : null,\n      performance_pct:   performancePct,\n      perf_1w_pct:       pct(a.perf_1w),\n      cagr_3y_pct:       pct(a.cagr_3y),\n      news:              newsMap[a.name] || null,\n    };\n  }\n\n  const assetsCalc = prices.assets.map(calcAsset);\n  const totalEur   = assetsCalc.reduce((s, a) => s + (a.current_value_eur || 0), 0);\n\n  const assets = assetsCalc.map(a => ({\n    ...a,\n    weight_pct: (a.current_value_eur != null && totalEur > 0)\n      ? Math.round(a.current_value_eur / totalEur * 10000) / 100 : null,\n  }));\n\n  // Basket-Aggregate, gewichtet nach current_value_eur\n  const round2 = (x) => Math.round(x * 100) / 100;\n  const basketMap = {};\n  assets.forEach(a => {\n    const b = a.basket || 'Sonstige';\n    if (!basketMap[b]) basketMap[b] = { basket: b, weight_pct: 0, perfNum: 0, perfDen: 0, weekNum: 0, weekDen: 0 };\n    const m = basketMap[b];\n    const v = a.current_value_eur || 0;\n    m.weight_pct += (a.weight_pct || 0);\n    if (a.performance_pct != null) { m.perfNum += a.performance_pct * v; m.perfDen += v; }\n    if (a.perf_1w_pct != null)     { m.weekNum += a.perf_1w_pct * v;     m.weekDen += v; }\n  });\n  const basket_summary = Object.values(basketMap).map(m => ({\n    basket:       m.basket,\n    weight_pct:   round2(m.weight_pct),\n    avg_perf_pct: m.perfDen > 0 ? round2(m.perfNum / m.perfDen) : null,\n    avg_week_pct: m.weekDen > 0 ? round2(m.weekNum / m.weekDen) : null,\n  })).sort((x, y) => (y.weight_pct || 0) - (x.weight_pct || 0));\n\n  const watchlist = prices.watchlist.map(w => ({\n    ...w,\n    perf_1w_pct: pct(w.perf_1w),\n    cagr_3y_pct: pct(w.cagr_3y),\n    news:        newsMap[w.name] || null,\n  }));\n\n  return [{ json: {\n    assets,\n    watchlist,\n    basket_summary,\n    macronews:           macroNews,\n    strategy,\n    portfolio_total_eur: Math.round(totalEur * 100) / 100,\n  } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        -176
+      ],
+      "id": "9ce5b66e-62e2-4286-a185-682aa0bc70bc",
+      "name": "Combine Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://portfolio-report-api:8000/generate-html",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { markdown: $json.markdown, title: 'Portfolio Bericht KW ' + $now.toFormat('WW yyyy') } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1584,
+        -176
+      ],
+      "id": "57b5270c-7d7e-4efb-b246-6aa514f6169f",
+      "name": "Pandoc To HTML",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "binaryData": true,
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1808,
+        -176
+      ],
+      "id": "825d6e01-72dd-40c5-8679-73ebec0bb361",
+      "name": "Send a document",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-opus-5",
+          "mode": "list",
+          "cachedResultName": "claude-opus-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Erstelle einen wöchentlichen Portfoliobericht auf Deutsch (Markdown) auf Basis der folgenden Daten.\n  Die Investmentstrategie steht im Feld \"strategy\", alle weiteren Daten (assets, watchlist, basket_summary, macronews,\n  portfolio_total_eur) sind enthalten.\n\n  WICHTIG – Tabellen NICHT selbst bauen:\n  - Gib KEINE Tabellen und KEINE Zahlen in Tabellenform aus.\n  - Setze an den Tabellenstellen exakt eine dieser Platzhalterzeilen (jeweils auf eigener Zeile, unverändert):\n    [[TABELLE:UEBERSICHT]]\n    [[TABELLE:EINZELWERTE]]\n    [[TABELLE:WATCHLIST]]\n  - Für den Gesamtwert schreibe den Platzhalter [[GESAMTWERT]] (nicht die Zahl).\n  - Die Tabellen/Werte werden nachgelagert automatisch eingefügt. Im Fließtext darfst du Zahlen nennen.\n\n  Thesis-Verdikte (für die Einzelwerte-Tabelle):\n  - Gib GANZ AM ENDE genau einen Block aus (wird nicht angezeigt), je Position eine Zeile, Name exakt aus dem Feld\n  \"name\":\n    <!--THESIS\n    <name>: intakt|angeschlagen|gebrochen\n    -->\n\n  Fehlende Kurse:\n  - Wenn \"price\" für eine Position null ist (Kursabruf fehlgeschlagen), weise im Fließtext kurz darauf hin und triff\n  keine Aussagen über deren aktuelle Performance, Bewertung oder Thesis (setze das Thesis-Verdikt dann auf\n  \"angeschlagen\" nur, wenn dies durch News begründet ist, sonst lasse die Zeile weg).\n\n  Portfoliodaten: {{ JSON.stringify($json) }}\n\n  ---\n\n  Struktur:\n\n  ## 1. Makroumfeld & Zinsen\n  Fließtext, 3–5 Sätze. Quellen: macronews.\n\n  ## 2. Portfolio-Übersicht\n  Gesamtwert: [[GESAMTWERT]]\n\n  [[TABELLE:UEBERSICHT]]\n\n  Auffällige Wochenbewegungen (Feld perf_1w_pct) in 2–3 Sätzen Fließtext.\n\n  ## 3. Einzelwerte\n\n  [[TABELLE:EINZELWERTE]]\n\n  Danach pro Position 2–3 Sätze Fließtext: relevante News + Begründung des Thesis-Status\n  (intakt/angeschlagen/gebrochen).\n\n  ## 4. Watchlist\n\n  [[TABELLE:WATCHLIST]]\n\n  Kurzeinschätzung je Watchlist-Wert als Fließtext; besonders auf gd200_cross-Signale hinweisen.\n\n  ## 5. Fazit & Handlungsempfehlungen\n  Fließtext. Empfehlungen strikt nach der Handlungslogik aus dem System-Prompt."
+            }
+          ]
+        },
+        "options": {
+          "system": "Du bist ein erfahrener Vermögensberater und Finanzjournalist.\n  Du erstellst einen wöchentlichen Börsenbericht auf Deutsch für ein persönliches Portfolio mit\n  Core-Satellite-Strategie.\n\n  Stil: präzise, analytisch, direkt – kein Marketing-Speak, keine leeren Phrasen.\n\n  Formatierung:\n  - Portfolio-Übersicht, Einzelwerte, Watchlist: Markdown-Tabellen\n  - Makro-Kommentar, News-Zusammenfassungen je Wert, Fazit: Fließtext\n  - Englische News-Quellen auf Deutsch zusammenfassen\n\n  Trend-Signale (Feld \"trend\" je Position):\n  - bullish          → Kurs > GD50 > GD200: Aufwärtstrend intakt\n  - correction       → GD50 > Kurs > GD200, GD50 steigt: technische Korrektur im Aufwärtstrend,\n  Nachkaufsignal\n  - weakening        → GD50 > Kurs > GD200, GD50 fällt: Momentum dreht, Struktur über GD200\n  noch intakt: halten, kein Nachkauf\n  - gd200_cross      → Kurs hat GD200 frisch (≤5 Tage) nach oben gekreuzt: neuer Aufwärtstrend\n  gestartet, Kaufsignal (besonders Watchlist beachten)\n  - recovering       → Kurs > GD200 > GD50: frühe Erholung, GD50 bestätigt noch nicht\n  - reversal_risk    → GD50 > GD200 > Kurs, GD50 fällt: tiefe Korrektur, Trendwende möglich\n  - bearish_bounce   → GD200 > Kurs > GD50: kurzfristige Erholung im Abwärtstrend, keine Käufe\n  - bearish          → Kurs < GD50 < GD200: Abwärtstrend bestätigt, keine Käufe\n\n  Handlungslogik (strikt einhalten):\n  - Standard: „Halten\" oder „Beobachten\"\n  - Nachkauf: nur bei intakter These UND Trend bullish oder correction\n  - Kaufsignal prüfen: bei gd200_cross, insbesondere auf der Watchlist\n  - Aktive Empfehlung (Verkauf / Trim): NUR bei (a) Thesis-Bruch oder (b) Positionsgröße\n  überschreitet Limit so stark, dass Warten bis zum Sommer-Rebalancing ein struktureller Fehler wäre\n  - Kein Aktionismus bei normaler Volatilität, weakening, reversal_risk oder bearish_bounce",
+          "maxTokens": 16000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        1008,
+        -176
+      ],
+      "id": "72f794bb-0b0d-4fae-b7a8-f76bb195e215",
+      "name": "Message Opus",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME",
+          "name": "Anthropic account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "  const data = $('Combine Data').first().json;\n  const llm  = $input.first().json;\n  // Text-Blöcke nach type filtern statt per Index: bei aktivem Extended Thinking\n  // steht auf content[0] ein thinking-Block, der Report erst auf content[1].\n  let md = (Array.isArray(llm.content) ? llm.content : [])\n    .filter(c => c?.type === 'text' && typeof c.text === 'string')\n    .map(c => c.text)\n    .join('\\n')\n    || (typeof llm.text === 'string' ? llm.text : '');\n\n  // Kein stiller Fallback auf '': sonst blieben nur die Tabellen übrig und der\n  // Report sähe erfolgreich aus, obwohl der komplette Bericht fehlt.\n  if (!md.trim()) {\n    throw new Error('Assembly: kein Text-Block von \"Message Opus\". Vorhandene Blocktypen: ['\n      + (llm.content ?? []).map(c => c?.type).join(', ') + '] – Top-Level-Keys: ['\n      + Object.keys(llm ?? {}).join(', ') + ']');\n  }\n\n  // dt. Zahlenformat (ICU-unabhängig, daher kein toLocaleString)\n  function deNum(x, dec = 2) {\n    if (x == null || isNaN(x)) return 'n/a';\n    const fixed = Number(x).toFixed(dec);\n    let [int, frac] = fixed.split('.');\n    const neg = int.startsWith('-'); if (neg) int = int.slice(1);\n    int = int.replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.');\n    return (neg ? '-' : '') + int + (frac ? ',' + frac : '');\n  }\n  const strip0 = (s) => s.includes(',') ? s.replace(/,?0+$/, '') : s;\n  const fmtNum = (x) => deNum(x, 2);\n  const fmtEur = (x) => (x == null || isNaN(x)) ? 'n/a' : deNum(x, 2) + ' €';\n  const fmtQty = (x) => (x == null || isNaN(x)) ? 'n/a' : strip0(deNum(x, 4));\n  const fmtPct = (x) => (x == null || isNaN(x)) ? 'n/a' : (x > 0 ? '+' : '') + deNum(x, 2) + ' %';\n  const fmtW   = (x) => (x == null || isNaN(x)) ? 'n/a' : deNum(x, 2) + ' %';\n  const tr     = (t) => t || 'n/a';\n\n  // Robuste Zeilen: jede Zelle wird von Umbrüchen befreit, Spalten mit ' | ' verbunden.\n  const mkRow = (cells) => '| ' + cells.map(c => String(c).replace(/\\s*\\n\\s*/g, ' ')).join(' | ') + ' |';\n  const sep   = (n) => '|' + '---|'.repeat(n);\n\n  // Thesis-Verdikte aus <!--THESIS ...--> lesen und Block entfernen\n  const thesis = {};\n  const tm = md.match(/<!--\\s*THESIS([\\s\\S]*?)-->/i);\n  if (tm) {\n    tm[1].split('\\n').forEach(line => {\n      const idx = line.lastIndexOf(':');\n      if (idx > -1) {\n        const name = line.slice(0, idx).trim().replace(/^[-*]\\s*/, '');\n        const val  = line.slice(idx + 1).trim().toLowerCase();\n        if (name) thesis[name] = val;\n      }\n    });\n    md = md.replace(tm[0], '').trim();\n  }\n  const allowed = new Set(['intakt', 'angeschlagen', 'gebrochen']);\n  const thesisFor = (name) => allowed.has(thesis[name]) ? thesis[name] : '–';\n\n  const overview = [\n    mkRow(['Basket', 'Gewicht', 'Ø Perf. seit Kauf', 'Wochenperf.']),\n    sep(4),\n    ...data.basket_summary.map(b => mkRow([\n      b.basket, fmtW(b.weight_pct), fmtPct(b.avg_perf_pct), fmtPct(b.avg_week_pct),\n    ])),\n  ].join('\\n');\n\n  const holdings = [\n    mkRow(['Asset', 'Kurs (€)', 'Perf. seit Kauf', 'Woche', 'Anzahl', 'Gesamtwert', 'Gewicht', 'CAGR 3J', 'Sharpe',\n  'Trend', 'Thesis']),\n    sep(11),\n    ...data.assets.map(a => mkRow([\n      a.name, fmtNum(a.price), fmtPct(a.performance_pct), fmtPct(a.perf_1w_pct),\n      fmtQty(a.quantity), fmtEur(a.current_value_eur), fmtW(a.weight_pct),\n      fmtPct(a.cagr_3y_pct), a.sharpe == null ? 'n/a' : fmtNum(a.sharpe),\n      tr(a.trend), thesisFor(a.name),\n    ])),\n  ].join('\\n');\n\n  const watch = [\n    mkRow(['Asset', 'Kurs', 'Trend']),\n    sep(3),\n    ...data.watchlist.map(w => mkRow([w.name, fmtNum(w.price), tr(w.trend)])),\n  ].join('\\n');\n\n  md = md.split('[[GESAMTWERT]]').join(fmtEur(data.portfolio_total_eur));\n\n  const blocks = {\n    '[[TABELLE:UEBERSICHT]]':  overview,\n    '[[TABELLE:EINZELWERTE]]': holdings,\n    '[[TABELLE:WATCHLIST]]':   watch,\n  };\n  for (const [ph, tbl] of Object.entries(blocks)) {\n    if (md.includes(ph)) md = md.split(ph).join('\\n\\n' + tbl + '\\n\\n');\n    else md += '\\n\\n' + tbl + '\\n';\n  }\n\n  return [{ json: { markdown: md } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        -176
+      ],
+      "id": "c49d5221-bcc3-47c4-902f-0c0ac7346acf",
+      "name": "Assembly"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FILE_ID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        112,
+        -368
+      ],
+      "id": "18cba4a7-da88-4bdf-95db-f80049e170b4",
+      "name": "Download file",
+      "alwaysOutputData": false,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "googleApi": {
+          "id": "REPLACE_ME",
+          "name": "Google Drive account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every Saturday 8am": {
+      "main": [
+        [
+          {
+            "node": "Postgres Assets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Assets": {
+      "main": [
+        [
+          {
+            "node": "Reorganize by Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Query": {
+      "main": [
+        [
+          {
+            "node": "Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Combine Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate News": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Fetch Prices": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Reorganize by Type": {
+      "main": [
+        [
+          {
+            "node": "Prepare Query",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Aggregate News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Data": {
+      "main": [
+        [
+          {
+            "node": "Message Opus",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pandoc To HTML": {
+      "main": [
+        [
+          {
+            "node": "Send a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message Opus": {
+      "main": [
+        [
+          {
+            "node": "Assembly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assembly": {
+      "main": [
+        [
+          {
+            "node": "Pandoc To HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}
