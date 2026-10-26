@@ -1,47 +1,49 @@
 # Personal Portfolio Report
 
-Automatisierter wöchentlicher Börsenbrief für ein privates Core-Satellite-Portfolio. Jeden Samstag um 08:00 sammelt ein n8n-Workflow Bestände, Kurse, News und die Anlagestrategie, lässt Claude Opus den Fließtext schreiben und schickt den fertigen Bericht als HTML-Datei per Telegram.
+Automated weekly market newsletter for a private core-satellite portfolio. Every Saturday at 08:00, an n8n workflow gathers holdings, prices, news and the investment strategy, has Claude Opus write the narrative, and sends the finished report as an HTML file via Telegram.
 
-Kernidee: **Das LLM berührt keine Zahl.** Alle Kennzahlen und Tabellen werden deterministisch berechnet und gesetzt. Opus schreibt nur Prosa und Platzhalter.
+Core idea: **The LLM never touches a number.** All metrics and tables are calculated and inserted deterministically. Opus only writes prose and placeholders.
+
+The report itself is written in German.
 
 ## Workflow
 
 ```mermaid
 flowchart LR
-    cron["Cron<br/>Sa 08:00"] --> pg[("PostgreSQL<br/>Bestand + Watchlist")]
+    cron["Cron<br/>Sat 08:00"] --> pg[("PostgreSQL<br/>Holdings + Watchlist")]
 
-    pg --> api["portfolio-report-api<br/>/fetch-prices<br/>Kurse, GD50/200, CAGR,<br/>Volatilität, Sharpe (EUR)"]
-    pg --> tav["Tavily Search<br/>News, Earnings, Makro<br/>(7-Tage-Fenster)"]
-    drive["Google Drive<br/>Strategiepapier"]
+    pg --> api["portfolio-report-api<br/>/fetch-prices<br/>Prices, SMA50/200, CAGR,<br/>Volatility, Sharpe (EUR)"]
+    pg --> tav["Tavily Search<br/>News, Earnings, Macro<br/>(7-day window)"]
+    drive["Google Drive<br/>Strategy paper"]
 
     api --> combine
     tav --> combine
     drive --> combine
 
-    combine["Combine (Code)<br/>Werte, Performance,<br/>Gewichte, Baskets"] --> opus["Claude Opus<br/>nur Fließtext +<br/>Platzhalter + THESIS-Block"]
-    opus --> assembly["Assembly (Code)<br/>Tabellen deterministisch<br/>einsetzen"]
-    assembly --> html["portfolio-report-api<br/>/generate-html<br/>Pandoc + CSS-Template"]
-    html --> tg["Telegram<br/>HTML-Datei"]
+    combine["Combine (Code)<br/>Values, Performance,<br/>Weights, Baskets"] --> opus["Claude Opus<br/>prose only +<br/>placeholders + THESIS block"]
+    opus --> assembly["Assembly (Code)<br/>insert tables<br/>deterministically"]
+    assembly --> html["portfolio-report-api<br/>/generate-html<br/>Pandoc + CSS template"]
+    html --> tg["Telegram<br/>HTML file"]
 ```
 
-| Schritt | Aufgabe |
+| Step | Purpose |
 |---|---|
-| PostgreSQL | Lädt Bestand und Watchlist in einer Abfrage (`UNION ALL`). Menge und Einstandspreis werden aus `transactions` berechnet |
-| portfolio-report-api | FastAPI + yfinance. Liefert alle Preise und Metriken in EUR (Frankfurt-Ticker, USD-Assets über `EURUSD=X` umgerechnet) und klassifiziert den Trend (bullish, correction, weakening, ...) |
-| Tavily | News je Position plus Makro- und Zinsthemen |
-| Combine | Berechnet Positionswert, Performance, Gewichtung, Wochen-Performance und Basket-Aggregate |
-| Claude Opus | Schreibt den Bericht als Markdown mit Platzhaltern wie `[[TABELLE:EINZELWERTE]]` und `[[GESAMTWERT]]` sowie einem unsichtbaren Block mit Thesis-Verdikten (intakt / angeschlagen / gebrochen) |
-| Assembly | Baut die Tabellen im deutschen Zahlenformat und ersetzt die Platzhalter |
-| /generate-html | Pandoc + CSS/JS-Template, farbcodierte Trend-, Thesis- und Performance-Werte |
+| PostgreSQL | Loads holdings and watchlist in a single query (`UNION ALL`). Quantity and cost basis are derived from `transactions` |
+| portfolio-report-api | FastAPI + yfinance. Returns all prices and metrics in EUR (Frankfurt tickers, USD assets converted via `EURUSD=X`) and classifies the trend (bullish, correction, weakening, ...) |
+| Tavily | News per position plus macro and interest-rate topics |
+| Combine | Calculates position value, performance, weighting, weekly performance and basket aggregates |
+| Claude Opus | Writes the report as Markdown with placeholders such as `[[TABELLE:EINZELWERTE]]` and `[[GESAMTWERT]]`, plus a hidden block with thesis verdicts (intact / damaged / broken) |
+| Assembly | Builds the tables in German number format and replaces the placeholders |
+| /generate-html | Pandoc + CSS/JS template, color-coded trend, thesis and performance values |
 
-## Datenmodell
+## Data Model
 
 ```mermaid
 erDiagram
-    accounts ||--o{ account_assets : "hält"
-    account_assets ||--o{ transactions : "hat"
-    account_assets ||--o{ dividends : "zahlt"
-    account_assets ||--o{ etf_age_adjustments : "hat"
+    accounts ||--o{ account_assets : "holds"
+    account_assets ||--o{ transactions : "has"
+    account_assets ||--o{ dividends : "pays"
+    account_assets ||--o{ etf_age_adjustments : "has"
 
     accounts {
         int id PK
@@ -90,13 +92,13 @@ erDiagram
     }
 ```
 
-- **Bestand und Einstandspreis** werden nicht gespeichert, sondern aus `transactions` abgeleitet. Gebühren erhöhen den Einstandspreis (österreichische Steuerlogik), Splits sind Transaktionen mit `price_per_unit = 0`.
-- **AgE** (ausschüttungsgleiche Erträge thesaurierender ETFs) erhöhen den steuerlichen Einstandspreis und verhindern so eine Doppelbesteuerung beim Verkauf.
-- `watchlist` ist ähnlich aufgebaut wie `account_assets`, hat aber kein Konto.
+- **Holdings and cost basis** are not stored but derived from `transactions`. Fees increase the cost basis (Austrian tax rules); splits are transactions with `price_per_unit = 0`.
+- **AgE** (*ausschüttungsgleiche Erträge*, deemed distributions of accumulating ETFs) increase the tax cost basis and thereby prevent double taxation on sale.
+- `watchlist` is structured similarly to `account_assets` but has no account.
 
-## Infrastruktur
+## Infrastructure
 
-Alle Dienste laufen als Docker-Stacks auf einem VPS und sprechen über das interne Netzwerk `portfolio_net` miteinander. Nach außen ist nur n8n über Caddy (`caddy_net`) erreichbar.
+All services run as Docker stacks on a VPS and communicate over the internal network `portfolio_net`. Only n8n is exposed externally, via Caddy (`caddy_net`).
 
 ```mermaid
 flowchart LR
@@ -110,19 +112,23 @@ flowchart LR
     n8n --> db
 ```
 
-## Repository-Inhalt
+## Repository Contents
 
-| Pfad | Inhalt |
+| Path | Contents |
 |---|---|
-| `n8n/Portfolio_Report_Weekly_2.json` | Exportierter n8n-Workflow |
-| `n8n/docs/n8n.md` | n8n-Stack, Kosten, Designentscheidungen |
-| `n8n/docs/portfolio-report-api.md` | API-Stack, EUR-Konsistenz, HTML-Rendering |
-| `n8n/docs/assetmanagement.md` | PostgreSQL-Stack und Datenbankschema |
+| `n8n/Portfolio_Report_Weekly_2.json` | Exported n8n workflow |
+| `n8n/docs/n8n.md` | n8n stack, costs, design decisions |
+| `n8n/docs/portfolio-report-api.md` | API stack, EUR consistency, HTML rendering |
+| `n8n/docs/assetmanagement.md` | PostgreSQL stack and database schema |
 
-API-Code, Docker-Compose-Dateien und das SQL-Schema liegen in einem separaten Infrastruktur-Repository.
+API code, Docker Compose files and the SQL schema live in a separate infrastructure repository.
 
-## Kosten
+## Costs
 
-Bei 15 Positionen und wöchentlichem Report ca. **0,38 USD pro Woche**. Tavily kommt mit dem kostenlosen Researcher-Tier aus, yfinance ist ebenfalls kostenlos, die Kosten entfallen damit im Wesentlichen auf Claude Opus.
+With 15 positions and a weekly report, roughly **USD 0.38 per week**. Tavily fits within the free Researcher tier and yfinance is free as well, so the cost is essentially Claude Opus.
 
-Mehr Positionen oder häufigere Läufe erhöhen die Kosten entsprechend, sowohl beim Opus-Aufruf als auch bei den Tavily-Suchanfragen (dann ggf. über das Freikontingent hinaus).
+More positions or more frequent runs increase the cost accordingly, both for the Opus call and for Tavily searches (possibly exceeding the free quota).
+
+## License
+
+[MIT](LICENSE)

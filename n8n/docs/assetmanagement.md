@@ -1,122 +1,122 @@
-# Assetmanagement Stack
+# Asset Management Stack
 
-Dieses Verzeichnis enthält die Kern-Infrastruktur für die Datenhaltung des Personal Portfolio Report Projekts.
+This directory contains the core data storage infrastructure of the Personal Portfolio Report project.
 
-## Dienste
+## Services
 
 ### postgres
-Der zentrale Datenbank-Dienst, der auf PostgreSQL 16 (Alpine-basiert) läuft.
+The central database service, running PostgreSQL 16 (Alpine-based).
 
-- **Container-Name**: `portfolio-postgres`
+- **Container name**: `portfolio-postgres`
 - **Image**: `postgres:16-alpine`
-- **Netzwerk**: `portfolio_net`
+- **Network**: `portfolio_net`
 - **Volumes**:
-    - `postgres_data`: Persistente Speicherung der Datenbankinhalte.
-    - `./init`: Enthält SQL-Skripte zur Initialisierung (Schema und Seed-Daten).
+    - `postgres_data`: Persistent storage of database contents.
+    - `./init`: Contains SQL scripts for initialization (schema and seed data).
 
-## Datenbank-Initialisierung
+## Database Initialization
 
-Die Datenbank wird automatisch beim ersten Start über die Skripte im Ordner `init/` konfiguriert:
+The database is configured automatically on first start via the scripts in the `init/` folder:
 
-1. `01_schema.sql`: Erstellt das Tabellenschema.
-2. `02_seed.sql`: Stammdaten für Assets und Konten.
-3. `03_seed_transactions.sql`: Historische Transaktionsdaten.
-4. `04_seed_dividends.sql`: Aufzeichnung von Dividendenzahlungen.
-5. `05_seed_age.sql`: Österreich-spezifische Korrekturdaten für die Vorabbesteuerung (AgE).
+1. `01_schema.sql`: Creates the table schema.
+2. `02_seed.sql`: Master data for assets and accounts.
+3. `03_seed_transactions.sql`: Historical transaction data.
+4. `04_seed_dividends.sql`: Record of dividend payments.
+5. `05_seed_age.sql`: Austria-specific adjustment data for advance taxation (AgE).
 
-## Docker Compose Konfiguration
+## Docker Compose Configuration
 
-Der Stack ist so konfiguriert, dass er robust und wartbar ist. Folgende Optionen sind in der `compose.yml` definiert:
+The stack is configured to be robust and maintainable. The following options are defined in `compose.yml`:
 
-- **Image**: Nutzt `postgres:16-alpine` für geringen Ressourcenverbrauch.
-- **Container Name**: Festgelegt auf `portfolio-postgres` zur eindeutigen Identifizierung.
-- **Restart Policy**: `unless-stopped` stellt sicher, dass der Dienst nach Fehlern oder Systemneustarts wieder anläuft.
-- **Environment**: Nutzt eine `.env`-Datei (`env_file`) zur Trennung von Konfiguration und Code.
-- **Volumes**: 
-    - Ein benanntes Volume (`postgres_data`) für Persistenz.
-    - Ein lokaler Mount (`./init`) für die automatische Schemagerierung beim Start.
-- **Networks**: Integration in das interne `portfolio_net`.
-- **Healthcheck**: Ein konfigurierter Check (`pg_isready`), der die Verfügbarkeit der Datenbank überwacht (Intervall: 10s, Timeout: 5s, Retries: 5).
+- **Image**: Uses `postgres:16-alpine` for low resource usage.
+- **Container name**: Fixed to `portfolio-postgres` for unambiguous identification.
+- **Restart policy**: `unless-stopped` ensures the service comes back up after failures or system reboots.
+- **Environment**: Uses a `.env` file (`env_file`) to separate configuration from code.
+- **Volumes**:
+    - A named volume (`postgres_data`) for persistence.
+    - A local mount (`./init`) for automatic schema generation on startup.
+- **Networks**: Integration into the internal `portfolio_net`.
+- **Healthcheck**: A configured check (`pg_isready`) that monitors database availability (interval: 10s, timeout: 5s, retries: 5).
 
-## Architektur-Philosophie und Insights
+## Architecture Philosophy and Insights
 
 ### Source of Truth
-Die Datenbank folgt dem Prinzip, dass der Bestand (`quantity`) und der Einstandspreis (`buy_in`) nicht statisch gespeichert, sondern dynamisch aus der Tabelle `transactions` berechnet werden. Dies verhindert Inkonsistenzen und ermöglicht eine lückenlose Historie.
+The database follows the principle that holdings (`quantity`) and cost basis (`buy_in`) are not stored statically but computed dynamically from the `transactions` table. This prevents inconsistencies and provides a complete history.
 
-### Steuerliche Logik (Österreich)
-Das Schema ist speziell auf das österreichische Steuerrecht ausgelegt:
-- **Einstandspreis-Berechnung**: Gebühren (`fees`) werden steuerlich berücksichtigt und erhöhen den Einstandspreis (`SUM(quantity * price + fees) / SUM(quantity)`).
-- **AgE (Ausschüttungsgleiche Erträge)**: Die Tabelle `etf_age_adjustments` speichert Korrekturwerte, die den steuerlichen Einstandspreis jährlich anpassen, um eine Doppelbesteuerung beim Verkauf zu vermeiden.
-- **Kapitalmaßnahmen**: Splits oder Bonus-Aktien werden als Transaktionen mit `price_per_unit = 0` abgebildet.
+### Tax Logic (Austria)
+The schema is designed specifically for Austrian tax law:
+- **Cost basis calculation**: Fees (`fees`) are taken into account for tax purposes and increase the cost basis (`SUM(quantity * price + fees) / SUM(quantity)`).
+- **AgE (*ausschüttungsgleiche Erträge*, deemed distributions)**: The `etf_age_adjustments` table stores adjustment values that raise the tax cost basis each year to avoid double taxation on sale.
+- **Corporate actions**: Splits or bonus shares are recorded as transactions with `price_per_unit = 0`.
 
-### Gold-Abbildung
-Gold-Positionen teilen sich denselben Ticker (`GC=F`), werden aber durch die `quantity_unit` (`g` oder `oz`) unterschieden. Die API übernimmt die Umrechnung, während die DB die physischen Einheiten speichert.
+### Gold Representation
+Gold positions share the same ticker (`GC=F`) but are distinguished by `quantity_unit` (`g` or `oz`). The API handles the conversion, while the DB stores the physical units.
 
-## Datenbankschema
+## Database Schema
 
-Die Datenbank nutzt mehrere Enums und Tabellen, um das Portfolio abzubilden.
+The database uses several enums and tables to model the portfolio.
 
-### Enums (Benutzerdefinierte Typen)
+### Enums (Custom Types)
 
 - `asset_class_type`: `ETF`, `Aktie`, `Krypto`, `Gold`, `Cash`
 - `basket_type`: `Core`, `Diversified Tech ex USA`, `US Big Tech Overweight`, `High Risk Stocks`, `Krypto`
 - `account_type`: `Depot`, `Wallet`, `Sparkonto`, `Girokonto`, `Bundesschatz`, `Lager`
 
-### Tabellen
+### Tables
 
 #### accounts
-Verwaltet die verschiedenen Depots, Wallets und Konten.
-- `id`: Eindeutige Kennung.
-- `name`: Name des Kontos (z. B. "Flatex Depot").
-- `type`: Art des Kontos (`account_type`).
+Manages the various brokerage accounts, wallets and bank accounts.
+- `id`: Unique identifier.
+- `name`: Name of the account (e.g. "Flatex Depot").
+- `type`: Type of account (`account_type`).
 
 #### account_assets
-Stammdaten der im Portfolio gehaltenen Vermögenswerte. Der aktuelle Bestand wird dynamisch aus den Transaktionen berechnet.
-- `id`: Eindeutige Kennung.
-- `name`: Bezeichnung des Assets.
-- `isin` / `wkn`: Standard-Identifikatoren.
-- `yahoo_ticker`: Ticker-Symbol für die Preisabfrage (z. B. `VWCE.DE`).
-- `asset_class`: Klassifizierung des Assets.
-- `basket`: Strategische Zuordnung.
-- `account_id`: Verknüpfung mit einem Konto (`accounts`).
-- `currency`: Handelswährung (Standard: `EUR`).
-- `quantity_unit`: Einheit der Menge (Standard: `share`, für Gold z. B. `g`).
-- `investment_thesis`: Freitext zur Begründung des Investments.
+Master data of the assets held in the portfolio. The current holding is computed dynamically from the transactions.
+- `id`: Unique identifier.
+- `name`: Name of the asset.
+- `isin` / `wkn`: Standard identifiers.
+- `yahoo_ticker`: Ticker symbol for price retrieval (e.g. `VWCE.DE`).
+- `asset_class`: Classification of the asset.
+- `basket`: Strategic allocation.
+- `account_id`: Link to an account (`accounts`).
+- `currency`: Trading currency (default: `EUR`).
+- `quantity_unit`: Unit of quantity (default: `share`, for gold e.g. `g`).
+- `investment_thesis`: Free text explaining the rationale for the investment.
 
 #### watchlist
-Beobachtungsliste für potenzielle Investments. Ähnlicher Aufbau wie `account_assets`, aber ohne Kontenzuordnung.
+Watchlist for potential investments. Similar structure to `account_assets`, but without an account assignment.
 
 #### transactions
-Die "Quelle der Wahrheit" für Bestände und Einstandspreise.
-- `asset_id`: Verknüpfung zum Asset.
-- `type`: Art der Transaktion (`BUY`, `SELL`, `SPLIT`).
-- `quantity`: Menge (Anzahl der Anteile).
-- `price_per_unit`: Preis pro Einheit zum Zeitpunkt der Transaktion.
-- `fees`: Transaktionsgebühren (erhöhen bei Käufen den steuerlichen Einstandspreis).
-- `transaction_date`: Datum der Ausführung.
+The "source of truth" for holdings and cost basis.
+- `asset_id`: Link to the asset.
+- `type`: Type of transaction (`BUY`, `SELL`, `SPLIT`).
+- `quantity`: Quantity (number of units).
+- `price_per_unit`: Price per unit at the time of the transaction.
+- `fees`: Transaction fees (increase the tax cost basis on purchases).
+- `transaction_date`: Date of execution.
 
 #### dividends
-Dokumentation von Brutto-Dividendenzahlungen.
-- `asset_id`: Zugehöriges Asset.
-- `amount`: Gesamtbetrag der Ausschüttung.
-- `transaction_date`: Datum des Zuflusses.
+Record of gross dividend payments.
+- `asset_id`: Associated asset.
+- `amount`: Total amount of the distribution.
+- `transaction_date`: Date of receipt.
 
 #### etf_age_adjustments
-Spezifisch für Österreich: Erfassung von ausschüttungsgleichen Erträgen (AgE).
-- `fiscal_year`: Das Steuerjahr der Meldung.
-- `age_per_unit`: Betrag pro Anteil, um den der steuerliche Einstandspreis erhöht werden muss.
-- `tax_paid`: Gezahlte KESt auf diese Erträge.
+Austria-specific: records deemed distributions (AgE).
+- `fiscal_year`: The tax year of the report.
+- `age_per_unit`: Amount per unit by which the tax cost basis must be increased.
+- `tax_paid`: Capital gains tax (KESt) paid on these income amounts.
 
-## Umgebungsvariablen
+## Environment Variables
 
-Die Konfiguration erfolgt über die `.env`-Datei:
+Configuration is done via the `.env` file:
 
-| Variable | Beschreibung |
+| Variable | Description |
 |---|---|
-| `POSTGRES_DB` | Name der Datenbank (Standard: `portfolio`) |
-| `POSTGRES_USER` | Benutzername für den Datenbankzugriff |
-| `POSTGRES_PASSWORD` | Passwort für den Datenbankbenutzer |
+| `POSTGRES_DB` | Name of the database (default: `portfolio`) |
+| `POSTGRES_USER` | Username for database access |
+| `POSTGRES_PASSWORD` | Password for the database user |
 
-## Netzwerk
+## Network
 
-Der Stack nutzt das interne Bridge-Netzwerk `portfolio_net`, um eine sichere Kommunikation zwischen der Datenbank, der API und n8n zu ermöglichen.
+The stack uses the internal bridge network `portfolio_net` to enable secure communication between the database, the API and n8n.

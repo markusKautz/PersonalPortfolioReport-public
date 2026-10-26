@@ -1,60 +1,60 @@
 # Portfolio Report API Stack
 
-Dieser Stack stellt eine spezialisierte API zur Verfügung, um Marktdaten abzufragen und die finalen Berichte zu generieren.
+This stack provides a specialized API for retrieving market data and generating the final reports.
 
-## Dienste
+## Services
 
 ### portfolio-report-api
-Eine FastAPI-Anwendung, die auf Python basiert.
+A Python-based FastAPI application.
 
-- **Container-Name**: `portfolio-report-api`
-- **Build**: Basierend auf dem lokalen `Dockerfile`.
-- **Netzwerk**: `portfolio_net` (extern).
+- **Container name**: `portfolio-report-api`
+- **Build**: Based on the local `Dockerfile`.
+- **Network**: `portfolio_net` (external).
 - **Volumes**:
-    - `./scripts`: Mapping der Python-Skripte in den Container (`/app/scripts`), read-only.
+    - `./scripts`: Maps the Python scripts into the container (`/app/scripts`), read-only.
 
-## Docker Compose Konfiguration
+## Docker Compose Configuration
 
-Die API wird lokal gebaut, um Flexibilität bei den Abhängigkeiten zu gewährleisten:
+The API is built locally to allow flexibility with dependencies:
 
-- **Build**: Nutzt das lokale `Dockerfile` im aktuellen Verzeichnis.
-- **Container Name**: `portfolio-report-api`.
-- **Restart Policy**: `unless-stopped`.
-- **Environment**: Nutzt eine `.env`-Datei (`env_file`) für anwendungsspezifische Parameter.
-- **Volumes**: Ein lokaler Mount (`./scripts`) bildet die Python-Logik in den Container ab (`ro` - read only für erhöhte Sicherheit).
-- **Networks**: Verbindet sich mit dem **externen** Netzwerk `portfolio_net`, um von n8n erreichbar zu sein.
+- **Build**: Uses the local `Dockerfile` in the current directory.
+- **Container name**: `portfolio-report-api`.
+- **Restart policy**: `unless-stopped`.
+- **Environment**: Uses a `.env` file (`env_file`) for application-specific parameters.
+- **Volumes**: A local mount (`./scripts`) maps the Python logic into the container (`ro` - read-only for improved security).
+- **Networks**: Connects to the **external** network `portfolio_net` so that it is reachable from n8n.
 
-## Architektur-Philosophie und Insights
+## Architecture Philosophy and Insights
 
-### EUR-Konsistenzstrategie
-Ein Kernprinzip der API ist die **Währungskonsistenz**. Alle Daten werden einheitlich in EUR geliefert, um Komplexität in nachgelagerten Systemen (n8n/KI) zu vermeiden:
-- **Bevorzugung von Frankfurt-Tickern**: Assets werden nach Möglichkeit über Frankfurt (`.F` / `.DE`) abgefragt, um direkt EUR-Kurse zu erhalten.
-- **In-place FX-Konvertierung**: Werte wie Gold (`GC=F`), die primär in USD vorliegen, werden intern über aktuelle FX-Kurse (`EURUSD=X`) umgerechnet.
-- **Vorteil**: Der `Combine Node` in n8n muss keine Währungslogik mehr implementieren; er rechnet immer mit `price` in EUR.
+### EUR Consistency Strategy
+A core principle of the API is **currency consistency**. All data is delivered uniformly in EUR to avoid complexity in downstream systems (n8n/AI):
+- **Preference for Frankfurt tickers**: Where possible, assets are queried via Frankfurt (`.F` / `.DE`) to get EUR prices directly.
+- **In-place FX conversion**: Assets such as gold (`GC=F`) that are primarily quoted in USD are converted internally using current FX rates (`EURUSD=X`).
+- **Benefit**: The `Combine` node in n8n no longer needs any currency logic; it always works with `price` in EUR.
 
-### Technische Design-Entscheidungen
-- **Pydantic vs. dict**: Die API nutzt `dict[str, Any]` statt strikter Pydantic-Modelle für den Datenaustausch. Dies wurde gewählt, da Pydantic-Modelle (selbst mit `extra="allow"`) bei der Serialisierung (`model_dump`) oft zusätzliche Felder ignorierten. `dict` bietet hier ein zuverlässigeres Passthrough für dynamische Daten.
-- **Reporting**: Statt komplexer PDF-Generierung wird auf HTML mit modernen CSS-Features gesetzt. Dies ermöglicht horizontales Scrolling für Tabellen und eine einfachere Farbdynamik (Trend/Performance) via JS/CSS.
+### Technical Design Decisions
+- **Pydantic vs. dict**: The API uses `dict[str, Any]` instead of strict Pydantic models for data exchange. This was chosen because Pydantic models (even with `extra="allow"`) often dropped additional fields during serialization (`model_dump`). `dict` provides a more reliable passthrough for dynamic data here.
+- **Reporting**: Instead of complex PDF generation, the API relies on HTML with modern CSS features. This enables horizontal scrolling for tables and simpler dynamic coloring (trend/performance) via JS/CSS.
 
-## Funktionalität
+## Functionality
 
-Die API bietet zwei Hauptfunktionen:
+The API offers two main functions:
 
-1. **Marktdaten-Abruf**: Nutzt `yfinance`, um aktuelle Kurse, gleitende Durchschnitte (GD50, GD200) sowie Performance-Metriken (CAGR, Volatilität, Sharpe Ratio) zu berechnen. Alle Preise werden einheitlich in EUR geliefert.
-2. **HTML-Generierung**: Nutzt Pandoc und WeasyPrint, um aus strukturierten Daten (JSON) visuell ansprechende HTML-Berichte basierend auf dem `report.html`-Template zu erstellen.
+1. **Market data retrieval**: Uses `yfinance` to compute current prices, moving averages (SMA50, SMA200) and performance metrics (CAGR, volatility, Sharpe ratio). All prices are delivered uniformly in EUR.
+2. **HTML generation**: Uses Pandoc and WeasyPrint to create visually appealing HTML reports from structured data (JSON), based on the `report.html` template.
 
-## Umgebungsvariablen
+## Environment Variables
 
-Die Konfiguration erfolgt über die `.env`-Datei:
+Configuration is done via the `.env` file:
 
-| Variable | Beschreibung |
+| Variable | Description |
 |---|---|
-| `RISK_FREE_RATE` | Der risikofreie Zinssatz für die Berechnung der Sharpe Ratio (z. B. `0.03` für 3%). |
+| `RISK_FREE_RATE` | The risk-free rate used to compute the Sharpe ratio (e.g. `0.03` for 3%). |
 
-## Entwicklung und Deployment
+## Development and Deployment
 
-- **Dockerfile**: Installiert notwendige System-Abhängigkeiten wie `pandoc`, `weasyprint` und die Python-Libraries aus `requirements.txt`.
+- **Dockerfile**: Installs required system dependencies such as `pandoc`, `weasyprint` and the Python libraries from `requirements.txt`.
 - **Scripts**:
-    - `api.py`: Definiert die FastAPI-Endpunkte.
-    - `fetch_prices.py`: Logik für die Abfrage und FX-Konvertierung der Ticker-Symbole.
-    - `templates/report.html`: Das CSS/HTML-Grundgerüst für den Bericht.
+    - `api.py`: Defines the FastAPI endpoints.
+    - `fetch_prices.py`: Logic for querying ticker symbols and FX conversion.
+    - `templates/report.html`: The CSS/HTML skeleton for the report.
